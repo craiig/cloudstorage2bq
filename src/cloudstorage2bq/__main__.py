@@ -40,7 +40,11 @@ def list_files(bucket_name: str, prefix: str, delimeter=None):
 
 
 def load_prefix_to_dataset(
-    bucket_name: str, bucket_prefix: str, dataset_name: str, table_name_prefix: str = ""
+    bucket_name: str,
+    bucket_prefix: str,
+    dataset_name: str,
+    overwrite_tables: bool,
+    table_name_prefix: str = "",
 ):
     """
     load all data in google cloud storage at bucket_name/prefix into a bigquery dataset.
@@ -83,17 +87,16 @@ def load_prefix_to_dataset(
         assert table_name[0].isalpha(), "table_name must start with a letter"
         table_name = f"{table_name_prefix}{table_name}"
 
-        # check if table exists first
-        if table_name in all_tables_in_dataset:
-            logger.info(f"table {table_name} already exists, skipping load")
-            continue
-
-        # if not, load table
         load_job = client.load_table_from_uri(
             file,
             dataset_ref.table(table_name),
             job_config=bigquery.LoadJobConfig(
-                source_format=bigquery.SourceFormat.PARQUET
+                source_format=bigquery.SourceFormat.PARQUET,
+                # if overwrite is on, we always replace the table, otherwise we throw an errror if the table is non-empty
+                # https://cloud.google.com/bigquery/docs/reference/rest/v2/Job#JobConfigurationLoad.FIELDS.write_disposition
+                write_disposition="WRITE_TRUNCATE"
+                if overwrite_tables
+                else "WRITE_EMPTY",
             ),
         )
         jobs.append(load_job)
@@ -125,7 +128,7 @@ def load_prefix_to_dataset(
             done = True
 
 
-def load_all_datasets(bucket_name: str, bucket_prefix: str, table_name_prefix: str):
+def load_all_datasets(bucket_name: str, bucket_prefix: str, table_name_prefix: str, overwrite_tables: bool):
     """Lists all prefixes in a bucket, and calls load_prefix_to_dataset for each one"""
     # create a client
     client = storage.Client()
@@ -150,6 +153,7 @@ def load_all_datasets(bucket_name: str, bucket_prefix: str, table_name_prefix: s
             bucket_prefix=prefix,
             dataset_name=dataset_name,
             table_name_prefix=table_name_prefix,
+            overwrite_tables=overwrite_tables,
         )
 
 
@@ -172,6 +176,12 @@ def main():
         help="The prefix to prepend to the table name for each file in the bucket",
         default="",
     )
+    parser.add_argument(
+        "--overwrite-tables",
+        help="Overwrite tables if they exist",
+        action="store_true",
+        default=True,
+    )
 
     args = parser.parse_args()
 
@@ -179,6 +189,7 @@ def main():
         bucket_name=args.bucket_name,
         bucket_prefix=args.bucket_prefix,
         table_name_prefix=args.table_name_prefix,
+        overwrite_tables=args.overwrite_tables,
     )
 
 
